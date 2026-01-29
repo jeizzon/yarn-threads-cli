@@ -1,0 +1,42 @@
+{
+  "name": "@threads-cli/yarn",
+  "version": "0.1.0",
+  "description": "CLI for Threads (like bird for Twitter)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "yarn": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeizzon/yarn.git"
+  },
+  "keywords": ["threads", "cli", "social-media"],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jeizzon/yarn/issues"
+  },
+  "homepage": "https://github.com/jeizzon/yarn#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@steipete/sweet-cookie": "^0.1.0",
+    "commander": "^12.0.0",
+    "json5": "^2.2.3",
+    "kleur": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
