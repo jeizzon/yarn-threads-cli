@@ -40,7 +40,8 @@
     "@steipete/sweet-cookie": "^0.1.0",
     "commander": "^12.0.0",
     "json5": "^2.2.3",
-    "kleur": "^4.1.5"
+    "kleur": "^4.1.5",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

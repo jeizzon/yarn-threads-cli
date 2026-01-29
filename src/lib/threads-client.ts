@@ -16,50 +16,27 @@ import type {
   SearchResult,
   FollowListResult,
 } from './threads-client-types.js';
+import { getDocIds, type DocIds } from './doc-ids.js';
 
-// Threads API base URL
-const THREADS_API_URL = 'https://www.threads.net/api/graphql';
-
-// Document IDs for Threads GraphQL queries (these may need updates)
-// These are reverse-engineered from the Threads web app
-const DOC_IDS = {
-  // User queries
-  userByUsername: '23996318473300828', // Get user profile by username
-  userData: '9360915773983802', // Get current user data
-
-  // Post queries
-  threadDetail: '6529829603744567', // Get single thread/post
-  threadReplies: '6684830921547925', // Get replies to a thread
-
-  // Feed queries
-  homeTimeline: '7846151975432989', // Home feed
-  userThreads: '6232751443445612', // User's threads/posts
-
-  // Engagement queries
-  likedThreads: '9360047727362754', // User's liked posts
-  savedThreads: '6354918684616234', // User's saved/bookmarked posts
-
-  // Social queries
-  followers: '7707543692631249', // User's followers
-  following: '7050524464970894', // User's following
-
-  // Search
-  searchThreads: '6529829603744567', // Search threads
-} as const;
+// Threads API base URL (threads.net redirects to threads.com)
+const THREADS_API_URL = 'https://www.threads.com/graphql/query';
 
 // Default user agent
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 // LSD token (app-specific token, may need periodic updates)
-const DEFAULT_LSD = 'AVqbxe3J_YA';
+const DEFAULT_LSD = '15a5jAMIP0UV0eY4EADtFZ';
 
 export class ThreadsClient {
   private csrfToken: string;
-  private userId: string | null;
+  // userId is available from cookies if needed: options.cookies.userId
   private cookieHeader: string;
   private userAgent: string;
   private timeoutMs?: number;
+  private docIds: DocIds | null = null;
+  private lsdToken: string | null = null;
+  private docIdsInitialized = false;
 
   constructor(options: ThreadsClientOptions) {
     if (!options.cookies.sessionId || !options.cookies.csrfToken) {
@@ -67,10 +44,31 @@ export class ThreadsClient {
     }
 
     this.csrfToken = options.cookies.csrfToken;
-    this.userId = options.cookies.userId;
+    // userId available via options.cookies.userId if needed
     this.cookieHeader = options.cookies.cookieHeader ?? '';
     this.userAgent = USER_AGENT;
     this.timeoutMs = options.timeoutMs;
+  }
+
+  /**
+   * Initialize doc_ids (lazy load on first API call).
+   */
+  private async ensureDocIds(): Promise<DocIds> {
+    if (!this.docIdsInitialized) {
+      const { docIds, lsdToken } = await getDocIds();
+      this.docIds = docIds;
+      this.lsdToken = lsdToken ?? null;
+      this.docIdsInitialized = true;
+    }
+    return this.docIds!;
+  }
+
+  /**
+   * Get the LSD token (for CSRF protection).
+   */
+  private async getLsdToken(): Promise<string> {
+    await this.ensureDocIds();
+    return this.lsdToken ?? DEFAULT_LSD;
   }
 
   /**
@@ -97,14 +95,14 @@ export class ThreadsClient {
   /**
    * Get base headers for API requests.
    */
-  private getBaseHeaders(): Record<string, string> {
+  private getBaseHeaders(lsdToken: string): Record<string, string> {
     return {
       accept: '*/*',
       'accept-language': 'en-US,en;q=0.9',
       'content-type': 'application/x-www-form-urlencoded',
       cookie: this.cookieHeader,
-      origin: 'https://www.threads.net',
-      referer: 'https://www.threads.net/',
+      origin: 'https://www.threads.com',
+      referer: 'https://www.threads.com/',
       'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
       'sec-ch-ua-mobile': '?0',
       'sec-ch-ua-platform': '"macOS"',
@@ -115,7 +113,7 @@ export class ThreadsClient {
       'x-asbd-id': '129477',
       'x-csrftoken': this.csrfToken,
       'x-fb-friendly-name': 'BarcelonaProfileRootQuery',
-      'x-fb-lsd': DEFAULT_LSD,
+      'x-fb-lsd': lsdToken,
       'x-ig-app-id': '238260118697367', // Threads app ID
     };
   }
@@ -128,13 +126,14 @@ export class ThreadsClient {
     variables: Record<string, unknown>,
     friendlyName?: string
   ): Promise<{ success: boolean; data?: unknown; error?: string }> {
-    const headers = this.getBaseHeaders();
+    const lsdToken = await this.getLsdToken();
+    const headers = this.getBaseHeaders(lsdToken);
     if (friendlyName) {
       headers['x-fb-friendly-name'] = friendlyName;
     }
 
     const body = new URLSearchParams({
-      lsd: DEFAULT_LSD,
+      lsd: lsdToken,
       variables: JSON.stringify(variables),
       doc_id: docId,
     });
@@ -154,7 +153,17 @@ export class ThreadsClient {
         };
       }
 
-      const data = (await response.json()) as Record<string, unknown>;
+      const text = await response.text();
+      
+      // Check if we got HTML instead of JSON (common auth issue)
+      if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+        return {
+          success: false,
+          error: 'Got HTML instead of JSON - likely an auth/session issue',
+        };
+      }
+      
+      const data = JSON.parse(text) as Record<string, unknown>;
 
       // Check for GraphQL errors
       const errors = data.errors as Array<{ message?: string }> | undefined;
@@ -181,63 +190,58 @@ export class ThreadsClient {
    * Get the current authenticated user's info (whoami).
    */
   async whoami(): Promise<WhoamiResult> {
-    // If we have a userId from cookies, try to get that user's info
-    if (this.userId) {
-      const variables = {
-        userID: this.userId,
+    // Use Instagram mobile API (more reliable than GraphQL)
+    try {
+      const headers: Record<string, string> = {
+        cookie: this.cookieHeader,
+        'x-csrftoken': this.csrfToken,
+        'x-ig-app-id': '238260118697367',
+        'user-agent': 'Barcelona 337.0.0.29.118 Android',
+        // Required headers for Instagram API
+        'sec-fetch-site': 'same-origin',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-dest': 'empty',
       };
 
-      const result = await this.graphqlRequest(
-        DOC_IDS.userData,
-        variables,
-        'BarcelonaProfileRootQuery'
-      );
-
-      if (!result.success) {
-        return { success: false, error: result.error ?? 'Failed to get user data' };
-      }
-
-      const user = this.parseUserData(result.data);
-      if (user) {
-        return { success: true, user };
-      }
-    }
-
-    // Fallback: try to get user data via Instagram API endpoint
-    try {
       const response = await this.fetchWithTimeout(
-        'https://www.threads.net/api/v1/accounts/current_user/',
+        'https://i.instagram.com/api/v1/accounts/current_user/',
         {
           method: 'GET',
-          headers: {
-            ...this.getBaseHeaders(),
-            'content-type': 'application/json',
-          },
+          headers,
         }
       );
 
       if (!response.ok) {
+        const errorText = await response.text();
         return {
           success: false,
-          error: `HTTP ${response.status}: Unable to fetch current user`,
+          error: `HTTP ${response.status}: ${errorText.slice(0, 200)}`,
         };
       }
 
       const data = (await response.json()) as Record<string, unknown>;
-      const userData = (data.user ?? data) as Record<string, unknown>;
+      
+      if (data.status !== 'ok' || !data.user) {
+        return {
+          success: false,
+          error: data.message ? String(data.message) : 'Failed to get user data',
+        };
+      }
+
+      const userData = data.user as Record<string, unknown>;
 
       return {
         success: true,
         user: {
           id: String(userData.pk ?? userData.id ?? 'unknown'),
           username: String(userData.username ?? 'unknown'),
-          fullName: String(userData.full_name ?? userData.fullName ?? ''),
-          bio: userData.biography ? String(userData.biography) : userData.bio ? String(userData.bio) : undefined,
-          profilePicUrl: userData.profile_pic_url ? String(userData.profile_pic_url) : userData.profilePicUrl ? String(userData.profilePicUrl) : undefined,
-          followerCount: typeof userData.follower_count === 'number' ? userData.follower_count : typeof userData.followerCount === 'number' ? userData.followerCount : undefined,
-          followingCount: typeof userData.following_count === 'number' ? userData.following_count : typeof userData.followingCount === 'number' ? userData.followingCount : undefined,
-          isPrivate: userData.is_private === true || userData.isPrivate === true,
-          isVerified: userData.is_verified === true || userData.isVerified === true,
+          fullName: String(userData.full_name ?? ''),
+          bio: userData.biography ? String(userData.biography) : undefined,
+          profilePicUrl: userData.profile_pic_url ? String(userData.profile_pic_url) : undefined,
+          followerCount: typeof userData.follower_count === 'number' ? userData.follower_count : undefined,
+          followingCount: typeof userData.following_count === 'number' ? userData.following_count : undefined,
+          isPrivate: userData.is_private === true,
+          isVerified: userData.is_verified === true,
           _raw: data,
         },
       };
@@ -256,12 +260,13 @@ export class ThreadsClient {
     // Remove @ if present
     const cleanUsername = username.replace(/^@/, '');
 
+    const docIds = await this.ensureDocIds();
     const variables = {
       username: cleanUsername,
     };
 
     const result = await this.graphqlRequest(
-      DOC_IDS.userByUsername,
+      docIds.userByUsername,
       variables,
       'BarcelonaProfileRootQuery'
     );
@@ -282,12 +287,13 @@ export class ThreadsClient {
    * Get a single post/thread by its code (from URL).
    */
   async getPost(postCode: string): Promise<GetPostResult> {
+    const docIds = await this.ensureDocIds();
     const variables = {
       postID: postCode,
     };
 
     const result = await this.graphqlRequest(
-      DOC_IDS.threadDetail,
+      docIds.threadDetail,
       variables,
       'BarcelonaPostPageQuery'
     );
@@ -311,6 +317,7 @@ export class ThreadsClient {
     postCode: string,
     cursor?: string
   ): Promise<GetPostsResult> {
+    const docIds = await this.ensureDocIds();
     const variables: Record<string, unknown> = {
       postID: postCode,
     };
@@ -319,7 +326,7 @@ export class ThreadsClient {
     }
 
     const result = await this.graphqlRequest(
-      DOC_IDS.threadReplies,
+      docIds.threadReplies,
       variables,
       'BarcelonaPostRepliesTabQuery'
     );
@@ -339,6 +346,7 @@ export class ThreadsClient {
     username: string,
     cursor?: string
   ): Promise<GetPostsResult> {
+    const docIds = await this.ensureDocIds();
     const cleanUsername = username.replace(/^@/, '');
 
     const variables: Record<string, unknown> = {
@@ -349,7 +357,7 @@ export class ThreadsClient {
     }
 
     const result = await this.graphqlRequest(
-      DOC_IDS.userThreads,
+      docIds.userThreads,
       variables,
       'BarcelonaProfileThreadsTabQuery'
     );
@@ -366,13 +374,14 @@ export class ThreadsClient {
    * Get home feed.
    */
   async getHomeFeed(cursor?: string): Promise<FeedResult> {
+    const docIds = await this.ensureDocIds();
     const variables: Record<string, unknown> = {};
     if (cursor) {
       variables.cursor = cursor;
     }
 
     const result = await this.graphqlRequest(
-      DOC_IDS.homeTimeline,
+      docIds.homeTimeline,
       variables,
       'BarcelonaHomeTimelineQuery'
     );
@@ -389,13 +398,14 @@ export class ThreadsClient {
    * Get user's liked posts.
    */
   async getLikedPosts(cursor?: string): Promise<FeedResult> {
+    const docIds = await this.ensureDocIds();
     const variables: Record<string, unknown> = {};
     if (cursor) {
       variables.cursor = cursor;
     }
 
     const result = await this.graphqlRequest(
-      DOC_IDS.likedThreads,
+      docIds.likedThreads,
       variables,
       'BarcelonaLikedPostsQuery'
     );
@@ -412,13 +422,14 @@ export class ThreadsClient {
    * Get user's saved/bookmarked posts.
    */
   async getSavedPosts(cursor?: string): Promise<FeedResult> {
+    const docIds = await this.ensureDocIds();
     const variables: Record<string, unknown> = {};
     if (cursor) {
       variables.cursor = cursor;
     }
 
     const result = await this.graphqlRequest(
-      DOC_IDS.savedThreads,
+      docIds.savedThreads,
       variables,
       'BarcelonaSavedPostsQuery'
     );
@@ -438,6 +449,7 @@ export class ThreadsClient {
     userId: string,
     cursor?: string
   ): Promise<FollowListResult> {
+    const docIds = await this.ensureDocIds();
     const variables: Record<string, unknown> = {
       userID: userId,
     };
@@ -446,7 +458,7 @@ export class ThreadsClient {
     }
 
     const result = await this.graphqlRequest(
-      DOC_IDS.followers,
+      docIds.followers,
       variables,
       'BarcelonaFollowersQuery'
     );
@@ -466,6 +478,7 @@ export class ThreadsClient {
     userId: string,
     cursor?: string
   ): Promise<FollowListResult> {
+    const docIds = await this.ensureDocIds();
     const variables: Record<string, unknown> = {
       userID: userId,
     };
@@ -474,7 +487,7 @@ export class ThreadsClient {
     }
 
     const result = await this.graphqlRequest(
-      DOC_IDS.following,
+      docIds.following,
       variables,
       'BarcelonaFollowingQuery'
     );
@@ -491,6 +504,7 @@ export class ThreadsClient {
    * Search threads.
    */
   async search(query: string, cursor?: string): Promise<SearchResult> {
+    const docIds = await this.ensureDocIds();
     const variables: Record<string, unknown> = {
       query,
     };
@@ -499,7 +513,7 @@ export class ThreadsClient {
     }
 
     const result = await this.graphqlRequest(
-      DOC_IDS.searchThreads,
+      docIds.searchThreads,
       variables,
       'BarcelonaSearchQuery'
     );
