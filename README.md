@@ -3,17 +3,17 @@
 A fast, lightweight CLI for [Threads](https://threads.net) — read posts, browse profiles, search users, and more from your terminal.
 
 ```bash
-yarn whoami
+yarn-threads whoami
 # Jeizzon Mendes @jeizzon.mp4
 # ✅ Authenticated successfully
 
-yarn about zuck
+yarn-threads about zuck
 # Mark Zuckerberg @zuck
 # ✔️ Verified
 # 📋 Mostly superintelligence and MMA takes
 # 5,444,367 followers | 460 following
 
-yarn user-posts zuck
+yarn-threads user-posts zuck
 # Posts by @zuck (15):
 # Today we're establishing a new top-level initiative called Meta Compute...
 ```
@@ -53,32 +53,32 @@ yarn-threads-cli uses cookies from your browser to authenticate with Threads. Yo
 
 ```bash
 # Use default Chrome profile
-yarn whoami
+yarn-threads whoami
 
 # Use a specific Chrome profile directory
-yarn --chrome-profile-dir "/path/to/chrome/profile/Default" whoami
+yarn-threads --chrome-profile-dir "/path/to/chrome/profile/Default" whoami
 
 # Use Chrome profile by name
-yarn --chrome-profile "Profile 1" whoami
+yarn-threads --chrome-profile "Profile 1" whoami
 ```
 
 ### Option 2: Firefox Profile
 
 ```bash
-yarn --firefox-profile "default-release" whoami
+yarn-threads --firefox-profile "default-release" whoami
 ```
 
 ### Option 3: Manual Cookies
 
 ```bash
-yarn --session-id "YOUR_SESSION_ID" --csrf-token "YOUR_CSRF_TOKEN" whoami
+yarn-threads --session-id "YOUR_SESSION_ID" --csrf-token "YOUR_CSRF_TOKEN" whoami
 ```
 
 Or via environment variables:
 ```bash
 export THREADS_SESSION_ID="..."
 export THREADS_CSRF_TOKEN="..."
-yarn whoami
+yarn-threads whoami
 ```
 
 ### Cookie Extraction
@@ -90,51 +90,51 @@ The CLI automatically extracts cookies from Safari, Chrome, and Firefox. On macO
 ### `whoami` — Show authenticated user
 
 ```bash
-yarn whoami
-yarn whoami --json
+yarn-threads whoami
+yarn-threads whoami --json
 ```
 
 ### `about <handle>` — Get user profile
 
 ```bash
-yarn about zuck
-yarn about @mosseri
-yarn about 314216 --json  # by user ID
+yarn-threads about zuck
+yarn-threads about @mosseri
+yarn-threads about 314216 --json  # by user ID
 ```
 
 ### `user-posts <handle>` — Get user's posts
 
 ```bash
-yarn user-posts zuck
-yarn user-posts mosseri --limit 5
+yarn-threads user-posts zuck
+yarn-threads user-posts mosseri --limit 5
 ```
 
 ### `read <url-or-code>` — Fetch a single post
 
 ```bash
-yarn read https://www.threads.net/@zuck/post/DTa3-B1EbTp
-yarn read DTa3-B1EbTp  # shortcode only
-yarn read 3812345678901234567  # post ID
+yarn-threads read https://www.threads.net/@zuck/post/DTa3-B1EbTp
+yarn-threads read DTa3-B1EbTp  # shortcode only
+yarn-threads read 3812345678901234567  # post ID
 ```
 
 ### `replies <url-or-code>` — Get replies to a post
 
 ```bash
-yarn replies https://www.threads.net/@zuck/post/DTa3-B1EbTp
-yarn replies DTa3-B1EbTp --limit 10
+yarn-threads replies https://www.threads.net/@zuck/post/DTa3-B1EbTp
+yarn-threads replies DTa3-B1EbTp --limit 10
 ```
 
 ### `thread <url-or-code>` — Full thread (post + replies)
 
 ```bash
-yarn thread https://www.threads.net/@zuck/post/DTa3-B1EbTp
+yarn-threads thread https://www.threads.net/@zuck/post/DTa3-B1EbTp
 ```
 
 ### `search <query>` — Search for users
 
 ```bash
-yarn search "design"
-yarn search "AI" --limit 20
+yarn-threads search "design"
+yarn-threads search "AI" --limit 20
 ```
 
 > **Note:** Search returns users, not posts (Instagram API limitation).
@@ -142,22 +142,22 @@ yarn search "AI" --limit 20
 ### `likes` — Get your liked posts
 
 ```bash
-yarn likes
-yarn likes --limit 50
+yarn-threads likes
+yarn-threads likes --limit 50
 ```
 
 ### `followers <handle>` — Get user's followers
 
 ```bash
-yarn followers zuck
-yarn followers zuck --limit 100
+yarn-threads followers zuck
+yarn-threads followers zuck --limit 100
 ```
 
 ### `following <handle>` — Get user's following list
 
 ```bash
-yarn following zuck
-yarn following jeizzon.mp4 --limit 50
+yarn-threads following zuck
+yarn-threads following jeizzon.mp4 --limit 50
 ```
 
 ## Output Formats
@@ -165,19 +165,19 @@ yarn following jeizzon.mp4 --limit 50
 ### Default (Human-Friendly)
 
 ```bash
-yarn about zuck
+yarn-threads about zuck
 ```
 
 ### Plain (No Emoji, No Color)
 
 ```bash
-yarn about zuck --plain
+yarn-threads about zuck --plain
 ```
 
 ### JSON
 
 ```bash
-yarn about zuck --json
+yarn-threads about zuck --json
 ```
 
 ## Configuration

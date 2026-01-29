@@ -36,7 +36,7 @@ export function createProgram(ctx: CliContext): Command {
   const program = new Command();
 
   program
-    .name('yarn')
+    .name('yarn-threads')
     .description('CLI for Threads')
     .version('0.1.0');
 
