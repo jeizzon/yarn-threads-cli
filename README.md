@@ -31,17 +31,16 @@ yarn-threads user-posts zuck
 ## Installation
 
 ```bash
-# Clone the repository
+npm install -g yarn-threads-cli
+```
+
+### From Source
+
+```bash
 git clone https://github.com/jeizzon/yarn-threads-cli.git
 cd yarn-threads-cli
-
-# Install dependencies
 npm install
-
-# Build
 npm run build
-
-# (Optional) Link globally
 npm link
 ```
 
