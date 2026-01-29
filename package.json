@@ -1,18 +1,23 @@
 {
   "name": "yarn-threads-cli",
   "version": "0.1.0",
-  "description": "CLI for Threads (like bird for Twitter)",
+  "description": "Fast CLI for Threads — read posts, browse profiles, search users from the terminal",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "yarn-threads": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -20,19 +25,22 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jeizzon/yarn.git"
+    "url": "git+https://github.com/jeizzon/yarn-threads-cli.git"
   },
   "keywords": [
     "threads",
     "cli",
-    "social-media"
+    "meta",
+    "instagram",
+    "social-media",
+    "terminal"
   ],
-  "author": "",
+  "author": "Jeizzon Mendes <hello@jeizzon.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/jeizzon/yarn/issues"
+    "url": "https://github.com/jeizzon/yarn-threads-cli/issues"
   },
-  "homepage": "https://github.com/jeizzon/yarn#readme",
+  "homepage": "https://github.com/jeizzon/yarn-threads-cli#readme",
   "engines": {
     "node": ">=18"
   },
