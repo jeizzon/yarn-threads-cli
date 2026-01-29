@@ -13,13 +13,20 @@
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jeizzon/yarn.git"
   },
-  "keywords": ["threads", "cli", "social-media"],
+  "keywords": [
+    "threads",
+    "cli",
+    "social-media"
+  ],
   "author": "",
   "license": "MIT",
   "bugs": {
@@ -37,6 +44,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
+    "@vitest/coverage-v8": "^4.0.18",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.18"
   }
 }
