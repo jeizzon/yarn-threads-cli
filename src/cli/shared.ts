@@ -28,6 +28,7 @@ export interface CredentialsOptions {
   csrfToken?: string;
   userId?: string;
   chromeProfile?: string;
+  chromeProfileDir?: string;
   firefoxProfile?: string;
   cookieTimeout?: string | number;
 }
@@ -153,6 +154,7 @@ export function createCliContext(argv: string[]): CliContext {
         userId: opts.userId,
         cookieSource: config.cookieSource,
         chromeProfile: opts.chromeProfile ?? config.chromeProfile,
+        chromeProfileDir: opts.chromeProfileDir ?? config.chromeProfileDir,
         firefoxProfile: opts.firefoxProfile ?? config.firefoxProfile,
         cookieTimeoutMs,
       });

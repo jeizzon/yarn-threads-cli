@@ -29,6 +29,8 @@ const THREADS_URL = 'https://www.threads.net/';
 const THREADS_ORIGINS: string[] = [
   'https://www.threads.net/',
   'https://threads.net/',
+  'https://www.threads.com/',
+  'https://threads.com/',
   'https://www.instagram.com/',
   'https://instagram.com/',
 ];
@@ -94,11 +96,14 @@ function resolveSources(
   return ['safari', 'chrome', 'firefox'];
 }
 
-function labelForSource(source: CookieSource, profile?: string): string {
+function labelForSource(source: CookieSource, profile?: string, profileDir?: string): string {
   if (source === 'safari') {
     return 'Safari';
   }
   if (source === 'chrome') {
+    if (profileDir) {
+      return `Chrome profile dir "${profileDir}"`;
+    }
     return profile ? `Chrome profile "${profile}"` : 'Chrome default profile';
   }
   return profile ? `Firefox profile "${profile}"` : 'Firefox default profile';
@@ -116,11 +121,19 @@ function pickCookieValue(
   }
 
   // Prefer threads.net domain
-  const threadsMatch = matches.find((c) =>
+  const threadsNetMatch = matches.find((c) =>
     (c.domain ?? '').includes('threads.net')
   );
-  if (threadsMatch?.value) {
-    return threadsMatch.value;
+  if (threadsNetMatch?.value) {
+    return threadsNetMatch.value;
+  }
+
+  // Try threads.com domain (Meta Threads)
+  const threadsComMatch = matches.find((c) =>
+    (c.domain ?? '').includes('threads.com')
+  );
+  if (threadsComMatch?.value) {
+    return threadsComMatch.value;
   }
 
   // Fall back to instagram.com domain (shared auth)
@@ -137,11 +150,15 @@ function pickCookieValue(
 async function readThreadsCookiesFromBrowser(options: {
   source: CookieSource;
   chromeProfile?: string;
+  chromeProfileDir?: string;
   firefoxProfile?: string;
   cookieTimeoutMs?: number;
 }): Promise<CookieExtractionResult> {
   const warnings: string[] = [];
   const out = buildEmpty();
+
+  // chromeProfileDir takes precedence over chromeProfile (it's a full path)
+  const effectiveChromeProfile = options.chromeProfileDir ?? options.chromeProfile;
 
   const { cookies, warnings: providerWarnings } = await getCookies({
     url: THREADS_URL,
@@ -149,7 +166,7 @@ async function readThreadsCookiesFromBrowser(options: {
     names: [...THREADS_COOKIE_NAMES],
     browsers: [options.source],
     mode: 'merge',
-    chromeProfile: options.chromeProfile,
+    chromeProfile: effectiveChromeProfile,
     firefoxProfile: options.firefoxProfile,
     timeoutMs: options.cookieTimeoutMs,
   });
@@ -175,7 +192,10 @@ async function readThreadsCookiesFromBrowser(options: {
       options.source,
       options.source === 'chrome'
         ? options.chromeProfile
-        : options.firefoxProfile
+        : options.firefoxProfile,
+      options.source === 'chrome'
+        ? options.chromeProfileDir
+        : undefined
     );
     return { cookies: out, warnings };
   }
@@ -202,9 +222,10 @@ export async function extractCookiesFromSafari(): Promise<CookieExtractionResult
 }
 
 export async function extractCookiesFromChrome(
-  profile?: string
+  profile?: string,
+  profileDir?: string
 ): Promise<CookieExtractionResult> {
-  return readThreadsCookiesFromBrowser({ source: 'chrome', chromeProfile: profile });
+  return readThreadsCookiesFromBrowser({ source: 'chrome', chromeProfile: profile, chromeProfileDir: profileDir });
 }
 
 export async function extractCookiesFromFirefox(
@@ -223,6 +244,7 @@ export async function resolveCredentials(options: {
   userId?: string;
   cookieSource?: CookieSource | CookieSource[];
   chromeProfile?: string;
+  chromeProfileDir?: string;
   firefoxProfile?: string;
   cookieTimeoutMs?: number;
 }): Promise<CookieExtractionResult> {
@@ -276,6 +298,7 @@ export async function resolveCredentials(options: {
     const res = await readThreadsCookiesFromBrowser({
       source,
       chromeProfile: options.chromeProfile,
+      chromeProfileDir: options.chromeProfileDir,
       firefoxProfile: options.firefoxProfile,
       cookieTimeoutMs,
     });

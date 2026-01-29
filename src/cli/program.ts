@@ -51,6 +51,11 @@ export function createProgram(ctx: CliContext): Command {
       ctx.config.chromeProfile
     )
     .option(
+      '--chrome-profile-dir <path>',
+      'Chrome/Chromium profile directory or cookie DB path',
+      ctx.config.chromeProfileDir
+    )
+    .option(
       '--firefox-profile <name>',
       'Firefox profile name',
       ctx.config.firefoxProfile
