@@ -1,28 +1,21 @@
 /**
- * Search command - search threads.
+ * Search command - search users (Instagram mobile API only supports user search).
  */
 
 import type { Command } from 'commander';
 import type { CliContext, CredentialsOptions } from '../cli/shared.js';
 import { ThreadsClient } from '../lib/threads-client.js';
-import type { PostData } from '../lib/threads-client-types.js';
 
 interface SearchCmdOpts {
   jsonFull?: boolean;
-  cursor?: string;
-  maxPages?: string;
-  all?: boolean;
 }
 
 export function registerSearchCommand(program: Command, ctx: CliContext): void {
   program
     .command('search')
-    .description('Search threads')
-    .argument('<query>', 'Search query')
+    .description('Search users on Threads')
+    .argument('<query>', 'Search query (username or name)')
     .option('--json-full', 'Include raw API response in JSON output')
-    .option('--cursor <cursor>', 'Pagination cursor')
-    .option('--max-pages <n>', 'Maximum number of pages to fetch')
-    .option('--all', 'Fetch all pages')
     .action(async (query: string, cmdOpts: SearchCmdOpts) => {
       const opts = program.opts() as CredentialsOptions;
       const output = ctx.getOutput();
@@ -46,47 +39,29 @@ export function registerSearchCommand(program: Command, ctx: CliContext): void {
       const timeoutMs = ctx.resolveTimeoutFromOptions(opts as { timeout?: string | number });
       const client = new ThreadsClient({ cookies, timeoutMs });
 
-      // Fetch search results with pagination
-      const maxPages = cmdOpts.maxPages ? parseInt(cmdOpts.maxPages, 10) : cmdOpts.all ? 100 : 1;
-      let cursor = cmdOpts.cursor;
-      const allPosts: PostData[] = [];
-      let pageCount = 0;
+      // Fetch search results
+      const result = await client.search(query);
 
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const result = await client.search(query, cursor);
-
-        if (!result.success) {
-          console.error(`${ctx.p('err')}${result.error}`);
-          if (allPosts.length === 0) {
-            process.exit(1);
-          }
-          break;
-        }
-
-        allPosts.push(...result.posts);
-        pageCount++;
-
-        if (!result.nextCursor || pageCount >= maxPages) {
-          break;
-        }
-
-        cursor = result.nextCursor;
+      if (!result.success) {
+        console.error(`${ctx.p('err')}${result.error}`);
+        process.exit(1);
       }
+
+      const users = result.users;
 
       // Output
       if (output.json) {
-        ctx.json(cmdOpts.jsonFull ? allPosts.map((p) => p._raw) : allPosts);
+        ctx.json(cmdOpts.jsonFull ? users.map((u) => u._raw) : users);
         return;
       }
 
-      if (allPosts.length === 0) {
-        console.log(ctx.colors.muted('No results found.'));
+      if (users.length === 0) {
+        console.log(ctx.colors.muted('No users found.'));
         return;
       }
 
-      console.log(ctx.colors.section(`Search results for "${query}" (${allPosts.length}):`));
+      console.log(ctx.colors.section(`Search results for "${query}" (${users.length} users):`));
       console.log('');
-      ctx.printPosts(allPosts, { showRaw: cmdOpts.jsonFull });
+      ctx.printUsers(users, { showRaw: cmdOpts.jsonFull });
     });
 }

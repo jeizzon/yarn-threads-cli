@@ -1,6 +1,6 @@
 /**
  * Threads API client.
- * Uses Instagram's GraphQL API which Threads is built on top of.
+ * Uses Instagram's mobile API (i.instagram.com) for reliable access.
  */
 
 import type {
@@ -13,30 +13,20 @@ import type {
   GetPostResult,
   GetPostsResult,
   FeedResult,
-  SearchResult,
+  UserSearchResult,
   FollowListResult,
 } from './threads-client-types.js';
-import { getDocIds, type DocIds } from './doc-ids.js';
 
-// Threads API base URL (threads.net redirects to threads.com)
-const THREADS_API_URL = 'https://www.threads.com/graphql/query';
+// Instagram mobile API base URL
+const INSTAGRAM_API_URL = 'https://i.instagram.com';
 
-// Default user agent
-const USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-// LSD token (app-specific token, may need periodic updates)
-const DEFAULT_LSD = '15a5jAMIP0UV0eY4EADtFZ';
+// Mobile app user agent (Barcelona = Threads codename)
+const MOBILE_USER_AGENT = 'Barcelona 337.0.0.29.118 Android';
 
 export class ThreadsClient {
   private csrfToken: string;
-  // userId is available from cookies if needed: options.cookies.userId
   private cookieHeader: string;
-  private userAgent: string;
   private timeoutMs?: number;
-  private docIds: DocIds | null = null;
-  private lsdToken: string | null = null;
-  private docIdsInitialized = false;
 
   constructor(options: ThreadsClientOptions) {
     if (!options.cookies.sessionId || !options.cookies.csrfToken) {
@@ -44,31 +34,8 @@ export class ThreadsClient {
     }
 
     this.csrfToken = options.cookies.csrfToken;
-    // userId available via options.cookies.userId if needed
     this.cookieHeader = options.cookies.cookieHeader ?? '';
-    this.userAgent = USER_AGENT;
     this.timeoutMs = options.timeoutMs;
-  }
-
-  /**
-   * Initialize doc_ids (lazy load on first API call).
-   */
-  private async ensureDocIds(): Promise<DocIds> {
-    if (!this.docIdsInitialized) {
-      const { docIds, lsdToken } = await getDocIds();
-      this.docIds = docIds;
-      this.lsdToken = lsdToken ?? null;
-      this.docIdsInitialized = true;
-    }
-    return this.docIds!;
-  }
-
-  /**
-   * Get the LSD token (for CSRF protection).
-   */
-  private async getLsdToken(): Promise<string> {
-    await this.ensureDocIds();
-    return this.lsdToken ?? DEFAULT_LSD;
   }
 
   /**
@@ -93,57 +60,45 @@ export class ThreadsClient {
   }
 
   /**
-   * Get base headers for API requests.
+   * Get Instagram mobile API headers.
    */
-  private getBaseHeaders(lsdToken: string): Record<string, string> {
+  private getInstagramHeaders(): Record<string, string> {
     return {
-      accept: '*/*',
-      'accept-language': 'en-US,en;q=0.9',
-      'content-type': 'application/x-www-form-urlencoded',
       cookie: this.cookieHeader,
-      origin: 'https://www.threads.com',
-      referer: 'https://www.threads.com/',
-      'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"macOS"',
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-site': 'same-origin',
-      'user-agent': this.userAgent,
-      'x-asbd-id': '129477',
       'x-csrftoken': this.csrfToken,
-      'x-fb-friendly-name': 'BarcelonaProfileRootQuery',
-      'x-fb-lsd': lsdToken,
-      'x-ig-app-id': '238260118697367', // Threads app ID
+      'x-ig-app-id': '238260118697367',
+      'user-agent': MOBILE_USER_AGENT,
+      'sec-fetch-site': 'same-origin',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty',
     };
   }
 
   /**
-   * Make a GraphQL request to the Threads API.
+   * Make a request to Instagram mobile API.
    */
-  private async graphqlRequest(
-    docId: string,
-    variables: Record<string, unknown>,
-    friendlyName?: string
-  ): Promise<{ success: boolean; data?: unknown; error?: string }> {
-    const lsdToken = await this.getLsdToken();
-    const headers = this.getBaseHeaders(lsdToken);
-    if (friendlyName) {
-      headers['x-fb-friendly-name'] = friendlyName;
+  private async instagramApiRequest(
+    endpoint: string,
+    options: { method?: 'GET' | 'POST'; body?: URLSearchParams | string } = {}
+  ): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> {
+    const headers = this.getInstagramHeaders();
+    const method = options.method ?? 'GET';
+    
+    const fetchOptions: RequestInit = {
+      method,
+      headers,
+    };
+    
+    if (options.body) {
+      fetchOptions.body = options.body.toString();
+      headers['content-type'] = 'application/x-www-form-urlencoded';
     }
 
-    const body = new URLSearchParams({
-      lsd: lsdToken,
-      variables: JSON.stringify(variables),
-      doc_id: docId,
-    });
-
     try {
-      const response = await this.fetchWithTimeout(THREADS_API_URL, {
-        method: 'POST',
-        headers,
-        body: body.toString(),
-      });
+      const response = await this.fetchWithTimeout(
+        `${INSTAGRAM_API_URL}${endpoint}`,
+        fetchOptions
+      );
 
       if (!response.ok) {
         const text = await response.text();
@@ -155,26 +110,24 @@ export class ThreadsClient {
 
       const text = await response.text();
       
-      // Check if we got HTML instead of JSON (common auth issue)
+      // Check for HTML (auth issue)
       if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
         return {
           success: false,
           error: 'Got HTML instead of JSON - likely an auth/session issue',
         };
       }
-      
-      const data = JSON.parse(text) as Record<string, unknown>;
 
-      // Check for GraphQL errors
-      const errors = data.errors as Array<{ message?: string }> | undefined;
-      if (errors && errors.length > 0) {
-        const errorMsg = errors
-          .map((e) => e.message ?? 'Unknown error')
-          .join('; ');
-        return { success: false, error: errorMsg };
+      const data = JSON.parse(text) as Record<string, unknown>;
+      
+      if (data.status !== 'ok' && data.status !== undefined) {
+        return {
+          success: false,
+          error: data.message ? String(data.message) : `Status: ${data.status}`,
+        };
       }
 
-      return { success: true, data: data.data };
+      return { success: true, data };
     } catch (error) {
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
@@ -190,465 +143,460 @@ export class ThreadsClient {
    * Get the current authenticated user's info (whoami).
    */
   async whoami(): Promise<WhoamiResult> {
-    // Use Instagram mobile API (more reliable than GraphQL)
-    try {
-      const headers: Record<string, string> = {
-        cookie: this.cookieHeader,
-        'x-csrftoken': this.csrfToken,
-        'x-ig-app-id': '238260118697367',
-        'user-agent': 'Barcelona 337.0.0.29.118 Android',
-        // Required headers for Instagram API
-        'sec-fetch-site': 'same-origin',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-dest': 'empty',
-      };
-
-      const response = await this.fetchWithTimeout(
-        'https://i.instagram.com/api/v1/accounts/current_user/',
-        {
-          method: 'GET',
-          headers,
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        return {
-          success: false,
-          error: `HTTP ${response.status}: ${errorText.slice(0, 200)}`,
-        };
-      }
-
-      const data = (await response.json()) as Record<string, unknown>;
-      
-      if (data.status !== 'ok' || !data.user) {
-        return {
-          success: false,
-          error: data.message ? String(data.message) : 'Failed to get user data',
-        };
-      }
-
-      const userData = data.user as Record<string, unknown>;
-
-      return {
-        success: true,
-        user: {
-          id: String(userData.pk ?? userData.id ?? 'unknown'),
-          username: String(userData.username ?? 'unknown'),
-          fullName: String(userData.full_name ?? ''),
-          bio: userData.biography ? String(userData.biography) : undefined,
-          profilePicUrl: userData.profile_pic_url ? String(userData.profile_pic_url) : undefined,
-          followerCount: typeof userData.follower_count === 'number' ? userData.follower_count : undefined,
-          followingCount: typeof userData.following_count === 'number' ? userData.following_count : undefined,
-          isPrivate: userData.is_private === true,
-          isVerified: userData.is_verified === true,
-          _raw: data,
-        },
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
+    const result = await this.instagramApiRequest('/api/v1/accounts/current_user/');
+    
+    if (!result.success) {
+      return { success: false, error: result.error ?? 'Failed to get user' };
     }
+
+    const userData = result.data?.user as Record<string, unknown> | undefined;
+    if (!userData) {
+      return { success: false, error: 'No user data in response' };
+    }
+
+    return {
+      success: true,
+      user: this.parseInstagramUser(userData, result.data),
+    };
   }
 
   /**
    * Get user profile by username.
+   * Uses Instagram mobile API: search for user, then fetch full info.
    */
   async getUserByUsername(username: string): Promise<GetUserResult> {
     // Remove @ if present
     const cleanUsername = username.replace(/^@/, '');
 
-    const docIds = await this.ensureDocIds();
-    const variables = {
-      username: cleanUsername,
-    };
-
-    const result = await this.graphqlRequest(
-      docIds.userByUsername,
-      variables,
-      'BarcelonaProfileRootQuery'
+    // First, search for the user to get their userId
+    const searchResult = await this.instagramApiRequest(
+      `/api/v1/users/search/?q=${encodeURIComponent(cleanUsername)}`
     );
 
-    if (!result.success) {
-      return { success: false, error: result.error ?? 'Failed to get user' };
+    if (!searchResult.success) {
+      return { success: false, error: searchResult.error ?? 'Search failed' };
     }
 
-    const user = this.parseUserData(result.data);
-    if (user) {
-      return { success: true, user };
+    const users = searchResult.data?.users as Array<Record<string, unknown>> | undefined;
+    if (!users || users.length === 0) {
+      return { success: false, error: 'User not found' };
     }
 
-    return { success: false, error: 'User not found' };
+    // Find exact username match
+    const matchedUser = users.find(
+      (u) => String(u.username).toLowerCase() === cleanUsername.toLowerCase()
+    );
+    
+    if (!matchedUser) {
+      return { success: false, error: `User @${cleanUsername} not found` };
+    }
+
+    const userId = String(matchedUser.pk ?? matchedUser.id);
+
+    // Now get full user info
+    const infoResult = await this.instagramApiRequest(`/api/v1/users/${userId}/info/`);
+    
+    if (!infoResult.success) {
+      // Fall back to the search result if info fetch fails
+      return {
+        success: true,
+        user: this.parseInstagramUser(matchedUser, searchResult.data),
+      };
+    }
+
+    const userData = infoResult.data?.user as Record<string, unknown> | undefined;
+    if (!userData) {
+      // Fall back to search result
+      return {
+        success: true,
+        user: this.parseInstagramUser(matchedUser, searchResult.data),
+      };
+    }
+
+    return {
+      success: true,
+      user: this.parseInstagramUser(userData, infoResult.data),
+    };
   }
 
   /**
    * Get a single post/thread by its code (from URL).
+   * Uses Instagram mobile API: GET /api/v1/media/{media_id}/info/
+   * The shortcode needs to be converted to media_id first.
    */
   async getPost(postCode: string): Promise<GetPostResult> {
-    const docIds = await this.ensureDocIds();
-    const variables = {
-      postID: postCode,
-    };
-
-    const result = await this.graphqlRequest(
-      docIds.threadDetail,
-      variables,
-      'BarcelonaPostPageQuery'
-    );
+    // Convert shortcode to media_id
+    const mediaId = this.shortcodeToMediaId(postCode);
+    
+    const result = await this.instagramApiRequest(`/api/v1/media/${mediaId}/info/`);
 
     if (!result.success) {
       return { success: false, error: result.error ?? 'Failed to get post' };
     }
 
-    const post = this.parsePostData(result.data);
-    if (post) {
-      return { success: true, post };
+    const items = result.data?.items as Array<Record<string, unknown>> | undefined;
+    if (!items || items.length === 0) {
+      return { success: false, error: 'Post not found' };
     }
 
-    return { success: false, error: 'Post not found' };
+    const postData = items[0];
+    return {
+      success: true,
+      post: this.parseInstagramPost(postData, result.data),
+    };
+  }
+
+  /**
+   * Convert Instagram shortcode to media_id.
+   * Instagram uses base64-like encoding for shortcodes.
+   */
+  private shortcodeToMediaId(shortcode: string): string {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    let mediaId = BigInt(0);
+    
+    for (const char of shortcode) {
+      const index = alphabet.indexOf(char);
+      if (index === -1) continue;
+      mediaId = mediaId * BigInt(64) + BigInt(index);
+    }
+    
+    return mediaId.toString();
   }
 
   /**
    * Get replies to a post.
+   * Uses Instagram mobile API: GET /api/v1/text_feed/{postId}/replies/
+   * Note: postCode needs to be converted to postId (media_id)
    */
   async getReplies(
     postCode: string,
     cursor?: string
   ): Promise<GetPostsResult> {
-    const docIds = await this.ensureDocIds();
-    const variables: Record<string, unknown> = {
-      postID: postCode,
-    };
-    if (cursor) {
-      variables.cursor = cursor;
+    // First get the post to obtain the media_id
+    const postResult = await this.getPost(postCode);
+    if (!postResult.success) {
+      return { success: false, error: postResult.error };
     }
 
-    const result = await this.graphqlRequest(
-      docIds.threadReplies,
-      variables,
-      'BarcelonaPostRepliesTabQuery'
-    );
+    const postId = postResult.post.id;
+    let endpoint = `/api/v1/text_feed/${postId}/replies/`;
+    if (cursor) {
+      endpoint += `?paging_token=${encodeURIComponent(cursor)}`;
+    }
+
+    const result = await this.instagramApiRequest(endpoint);
 
     if (!result.success) {
       return { success: false, error: result.error ?? 'Failed to get replies' };
     }
 
-    const { posts, nextCursor } = this.parsePostList(result.data);
-    return { success: true, posts, nextCursor };
+    // Parse replies from the response
+    const posts = this.parseRepliesResponse(result.data);
+    const nextCursor = result.data?.paging_tokens 
+      ? String((result.data.paging_tokens as Record<string, unknown>).downward ?? '')
+      : undefined;
+    
+    return { success: true, posts, nextCursor: nextCursor || undefined };
+  }
+  
+  /**
+   * Parse replies from Instagram API response.
+   * Replies have a different structure than regular threads.
+   */
+  private parseRepliesResponse(data: Record<string, unknown> | undefined): PostData[] {
+    const posts: PostData[] = [];
+    
+    if (!data) return posts;
+    
+    // Replies are in reply_threads array
+    const replyThreads = data.reply_threads as Array<Record<string, unknown>> | undefined;
+    
+    if (Array.isArray(replyThreads)) {
+      for (const thread of replyThreads) {
+        const threadItems = thread.thread_items as Array<Record<string, unknown>> | undefined;
+        if (threadItems && threadItems.length > 0) {
+          const postData = threadItems[0].post as Record<string, unknown> | undefined;
+          if (postData) {
+            posts.push(this.parseInstagramPost(postData, thread));
+          }
+        }
+      }
+    }
+    
+    return posts;
   }
 
   /**
    * Get user's posts/threads.
+   * Uses Instagram mobile API: GET /api/v1/text_feed/{userId}/profile/
    */
   async getUserPosts(
     username: string,
     cursor?: string
   ): Promise<GetPostsResult> {
-    const docIds = await this.ensureDocIds();
     const cleanUsername = username.replace(/^@/, '');
 
-    const variables: Record<string, unknown> = {
-      username: cleanUsername,
-    };
-    if (cursor) {
-      variables.cursor = cursor;
+    // First, get user ID from username
+    const userResult = await this.getUserByUsername(cleanUsername);
+    if (!userResult.success) {
+      return { success: false, error: userResult.error };
     }
 
-    const result = await this.graphqlRequest(
-      docIds.userThreads,
-      variables,
-      'BarcelonaProfileThreadsTabQuery'
-    );
+    const userId = userResult.user.id;
+    let endpoint = `/api/v1/text_feed/${userId}/profile/`;
+    if (cursor) {
+      endpoint += `?max_id=${encodeURIComponent(cursor)}`;
+    }
 
+    const result = await this.instagramApiRequest(endpoint);
+    
     if (!result.success) {
       return { success: false, error: result.error ?? 'Failed to get user posts' };
     }
 
-    const { posts, nextCursor } = this.parsePostList(result.data);
+    const { posts, nextCursor } = this.parseInstagramThreadList(result.data);
     return { success: true, posts, nextCursor };
   }
 
   /**
    * Get home feed.
+   * Note: Instagram mobile API home feed endpoint is not publicly accessible.
+   * This attempts the text_feed endpoint which may require additional auth.
    */
   async getHomeFeed(cursor?: string): Promise<FeedResult> {
-    const docIds = await this.ensureDocIds();
-    const variables: Record<string, unknown> = {};
+    // Try the Threads-specific timeline endpoint
+    let endpoint = '/api/v1/text_feed/timeline/';
     if (cursor) {
-      variables.cursor = cursor;
+      endpoint += `?max_id=${encodeURIComponent(cursor)}`;
     }
 
-    const result = await this.graphqlRequest(
-      docIds.homeTimeline,
-      variables,
-      'BarcelonaHomeTimelineQuery'
-    );
+    const result = await this.instagramApiRequest(endpoint);
 
     if (!result.success) {
-      return { success: false, error: result.error ?? 'Failed to get home feed' };
+      // Fall back error message
+      return { 
+        success: false, 
+        error: 'Home feed is not available via mobile API. Use the web interface instead.' 
+      };
     }
 
-    const { posts, nextCursor } = this.parsePostList(result.data);
+    const { posts, nextCursor } = this.parseInstagramThreadList(result.data);
     return { success: true, posts, nextCursor };
   }
 
   /**
    * Get user's liked posts.
+   * Uses Instagram mobile API: GET /api/v1/feed/liked/
    */
   async getLikedPosts(cursor?: string): Promise<FeedResult> {
-    const docIds = await this.ensureDocIds();
-    const variables: Record<string, unknown> = {};
+    let endpoint = '/api/v1/feed/liked/';
     if (cursor) {
-      variables.cursor = cursor;
+      endpoint += `?max_id=${encodeURIComponent(cursor)}`;
     }
 
-    const result = await this.graphqlRequest(
-      docIds.likedThreads,
-      variables,
-      'BarcelonaLikedPostsQuery'
-    );
+    const result = await this.instagramApiRequest(endpoint);
 
     if (!result.success) {
       return { success: false, error: result.error ?? 'Failed to get liked posts' };
     }
 
-    const { posts, nextCursor } = this.parsePostList(result.data);
+    const { posts, nextCursor } = this.parseInstagramThreadList(result.data);
     return { success: true, posts, nextCursor };
   }
 
   /**
    * Get user's saved/bookmarked posts.
+   * Note: The saved posts endpoint is not reliably available via Instagram mobile API.
    */
-  async getSavedPosts(cursor?: string): Promise<FeedResult> {
-    const docIds = await this.ensureDocIds();
-    const variables: Record<string, unknown> = {};
-    if (cursor) {
-      variables.cursor = cursor;
-    }
-
-    const result = await this.graphqlRequest(
-      docIds.savedThreads,
-      variables,
-      'BarcelonaSavedPostsQuery'
-    );
-
-    if (!result.success) {
-      return { success: false, error: result.error ?? 'Failed to get saved posts' };
-    }
-
-    const { posts, nextCursor } = this.parsePostList(result.data);
-    return { success: true, posts, nextCursor };
+  async getSavedPosts(_cursor?: string): Promise<FeedResult> {
+    return { 
+      success: false, 
+      error: 'Saved posts are not available via mobile API. Use the web interface instead.' 
+    };
   }
 
   /**
    * Get user's followers.
+   * Uses Instagram mobile API: GET /api/v1/friendships/{userId}/followers/
    */
   async getFollowers(
     userId: string,
     cursor?: string
   ): Promise<FollowListResult> {
-    const docIds = await this.ensureDocIds();
-    const variables: Record<string, unknown> = {
-      userID: userId,
-    };
+    let endpoint = `/api/v1/friendships/${userId}/followers/`;
     if (cursor) {
-      variables.cursor = cursor;
+      endpoint += `?max_id=${encodeURIComponent(cursor)}`;
     }
 
-    const result = await this.graphqlRequest(
-      docIds.followers,
-      variables,
-      'BarcelonaFollowersQuery'
-    );
+    const result = await this.instagramApiRequest(endpoint);
 
     if (!result.success) {
       return { success: false, error: result.error ?? 'Failed to get followers' };
     }
 
-    const { users, nextCursor } = this.parseUserList(result.data);
-    return { success: true, users, nextCursor };
+    const users = result.data?.users as Array<Record<string, unknown>> | undefined;
+    const nextCursor = result.data?.next_max_id ? String(result.data.next_max_id) : undefined;
+
+    if (!users) {
+      return { success: true, users: [], nextCursor };
+    }
+
+    const parsedUsers = users.map((u) => this.parseInstagramUser(u, result.data));
+    return { success: true, users: parsedUsers, nextCursor };
   }
 
   /**
    * Get user's following.
+   * Uses Instagram mobile API: GET /api/v1/friendships/{userId}/following/
    */
   async getFollowing(
     userId: string,
     cursor?: string
   ): Promise<FollowListResult> {
-    const docIds = await this.ensureDocIds();
-    const variables: Record<string, unknown> = {
-      userID: userId,
-    };
+    let endpoint = `/api/v1/friendships/${userId}/following/`;
     if (cursor) {
-      variables.cursor = cursor;
+      endpoint += `?max_id=${encodeURIComponent(cursor)}`;
     }
 
-    const result = await this.graphqlRequest(
-      docIds.following,
-      variables,
-      'BarcelonaFollowingQuery'
-    );
+    const result = await this.instagramApiRequest(endpoint);
 
     if (!result.success) {
       return { success: false, error: result.error ?? 'Failed to get following' };
     }
 
-    const { users, nextCursor } = this.parseUserList(result.data);
-    return { success: true, users, nextCursor };
+    const users = result.data?.users as Array<Record<string, unknown>> | undefined;
+    const nextCursor = result.data?.next_max_id ? String(result.data.next_max_id) : undefined;
+
+    if (!users) {
+      return { success: true, users: [], nextCursor };
+    }
+
+    const parsedUsers = users.map((u) => this.parseInstagramUser(u, result.data));
+    return { success: true, users: parsedUsers, nextCursor };
   }
 
   /**
-   * Search threads.
+   * Search users (Instagram mobile API doesn't have thread search, only user search).
+   * Uses Instagram mobile API: GET /api/v1/users/search/?q={query}
    */
-  async search(query: string, cursor?: string): Promise<SearchResult> {
-    const docIds = await this.ensureDocIds();
-    const variables: Record<string, unknown> = {
-      query,
-    };
-    if (cursor) {
-      variables.cursor = cursor;
-    }
-
-    const result = await this.graphqlRequest(
-      docIds.searchThreads,
-      variables,
-      'BarcelonaSearchQuery'
+  async search(query: string, _cursor?: string): Promise<UserSearchResult> {
+    const result = await this.instagramApiRequest(
+      `/api/v1/users/search/?q=${encodeURIComponent(query)}`
     );
 
     if (!result.success) {
       return { success: false, error: result.error ?? 'Search failed' };
     }
 
-    const { posts, nextCursor } = this.parsePostList(result.data);
-    return { success: true, posts, nextCursor };
+    const users = result.data?.users as Array<Record<string, unknown>> | undefined;
+    if (!users) {
+      return { success: true, users: [] };
+    }
+
+    const parsedUsers = users.map((u) => this.parseInstagramUser(u, result.data));
+    return { success: true, users: parsedUsers };
   }
 
   // ============ Data Parsing Helpers ============
 
   /**
-   * Parse user data from GraphQL response.
+   * Parse user from Instagram mobile API response.
    */
-  private parseUserData(data: unknown): UserData | null {
-    if (!data || typeof data !== 'object') {
-      return null;
-    }
-
-    // Navigate through common response structures
-    const d = data as Record<string, unknown>;
-    const dData = d.data as Record<string, unknown> | undefined;
-    const barcelonaProfile = d.barcelona_profile as Record<string, unknown> | undefined;
-    const userData =
-      d.user ??
-      dData?.user ??
-      barcelonaProfile?.user ??
-      d;
-
-    if (!userData || typeof userData !== 'object') {
-      return null;
-    }
-
-    const u = userData as Record<string, unknown>;
-
+  private parseInstagramUser(userData: Record<string, unknown>, raw?: unknown): UserData {
+    const textPostAppInfo = userData.text_post_app_info as Record<string, unknown> | undefined;
+    
     return {
-      id: String(u.pk ?? u.id ?? u.user_id ?? ''),
-      username: String(u.username ?? ''),
-      fullName: String(u.full_name ?? u.fullName ?? ''),
-      bio: u.biography ? String(u.biography) : u.bio ? String(u.bio) : undefined,
-      profilePicUrl: u.profile_pic_url
-        ? String(u.profile_pic_url)
-        : u.profilePicUrl
-          ? String(u.profilePicUrl)
-          : undefined,
-      followerCount:
-        typeof u.follower_count === 'number'
-          ? u.follower_count
-          : typeof u.followerCount === 'number'
-            ? u.followerCount
-            : undefined,
-      followingCount:
-        typeof u.following_count === 'number'
-          ? u.following_count
-          : typeof u.followingCount === 'number'
-            ? u.followingCount
-            : undefined,
-      threadCount: (() => {
-        const textPostAppInfo = u.text_post_app_info as Record<string, unknown> | undefined;
-        return typeof textPostAppInfo?.thread_count === 'number'
-          ? textPostAppInfo.thread_count
-          : undefined;
-      })(),
-      isPrivate: u.is_private === true || u.isPrivate === true,
-      isVerified: u.is_verified === true || u.isVerified === true,
-      _raw: data,
+      id: String(userData.pk ?? userData.id ?? ''),
+      username: String(userData.username ?? ''),
+      fullName: String(userData.full_name ?? ''),
+      bio: userData.biography ? String(userData.biography) : undefined,
+      profilePicUrl: userData.profile_pic_url ? String(userData.profile_pic_url) : undefined,
+      followerCount: typeof userData.follower_count === 'number' ? userData.follower_count : undefined,
+      followingCount: typeof userData.following_count === 'number' ? userData.following_count : undefined,
+      threadCount: typeof textPostAppInfo?.thread_count === 'number' ? textPostAppInfo.thread_count : undefined,
+      isPrivate: userData.is_private === true,
+      isVerified: userData.is_verified === true,
+      _raw: raw,
     };
   }
 
   /**
-   * Parse post data from GraphQL response.
+   * Parse a list of threads from Instagram mobile API response.
    */
-  private parsePostData(data: unknown): PostData | null {
-    if (!data || typeof data !== 'object') {
-      return null;
+  private parseInstagramThreadList(data: Record<string, unknown> | undefined): {
+    posts: PostData[];
+    nextCursor?: string;
+  } {
+    const posts: PostData[] = [];
+    
+    if (!data) {
+      return { posts };
     }
 
-    const d = data as Record<string, unknown>;
-    const dData = d.data as Record<string, unknown> | undefined;
-    const containingThread = d.containing_thread as Record<string, unknown> | undefined;
-    const threadItems = containingThread?.thread_items as Array<Record<string, unknown>> | undefined;
-    const postData =
-      d.post ??
-      d.thread ??
-      dData?.post ??
-      threadItems?.[0]?.post ??
-      d;
-
-    if (!postData || typeof postData !== 'object') {
-      return null;
+    // Instagram API returns threads in different structures
+    const threads = data.threads ?? data.items ?? data.medias ?? [];
+    
+    if (Array.isArray(threads)) {
+      for (const thread of threads) {
+        const t = thread as Record<string, unknown>;
+        // Threads can have thread_items array (nested posts) or be direct posts
+        const threadItems = t.thread_items as Array<Record<string, unknown>> | undefined;
+        
+        if (threadItems && threadItems.length > 0) {
+          // Get the main post from thread_items
+          const mainPost = threadItems[0].post as Record<string, unknown> | undefined;
+          if (mainPost) {
+            posts.push(this.parseInstagramPost(mainPost, thread));
+          }
+        } else if (t.post) {
+          // Direct post object
+          posts.push(this.parseInstagramPost(t.post as Record<string, unknown>, thread));
+        } else if (t.pk || t.code) {
+          // The thread itself is a post
+          posts.push(this.parseInstagramPost(t, thread));
+        }
+      }
     }
 
-    const p = postData as Record<string, unknown>;
-    const user = (p.user ?? p.owner ?? {}) as Record<string, unknown>;
-    const caption = (p.caption ?? {}) as Record<string, unknown>;
+    // Extract pagination cursor
+    const nextCursor = data.next_max_id 
+      ? String(data.next_max_id) 
+      : data.paging_tokens 
+        ? String((data.paging_tokens as Record<string, unknown>).downward ?? '')
+        : undefined;
+
+    return { posts, nextCursor: nextCursor || undefined };
+  }
+
+  /**
+   * Parse post from Instagram mobile API response.
+   */
+  private parseInstagramPost(postData: Record<string, unknown>, raw?: unknown): PostData {
+    const user = (postData.user ?? {}) as Record<string, unknown>;
+    const caption = (postData.caption ?? {}) as Record<string, unknown>;
+    const textPostAppInfo = postData.text_post_app_info as Record<string, unknown> | undefined;
 
     return {
-      id: String(p.pk ?? p.id ?? ''),
-      code: String(p.code ?? p.shortcode ?? ''),
-      text: String(caption.text ?? p.text ?? p.caption ?? ''),
+      id: String(postData.pk ?? postData.id ?? ''),
+      code: String(postData.code ?? ''),
+      text: String(caption.text ?? postData.text ?? ''),
       author: {
         id: String(user.pk ?? user.id ?? ''),
         username: String(user.username ?? ''),
-        fullName: String(user.full_name ?? user.fullName ?? ''),
-        profilePicUrl: user.profile_pic_url
-          ? String(user.profile_pic_url)
-          : undefined,
+        fullName: String(user.full_name ?? ''),
+        profilePicUrl: user.profile_pic_url ? String(user.profile_pic_url) : undefined,
         isVerified: user.is_verified === true,
       },
-      createdAt: this.parseTimestamp(p.taken_at ?? p.timestamp ?? p.createdAt),
-      likeCount:
-        typeof p.like_count === 'number'
-          ? p.like_count
-          : typeof p.likeCount === 'number'
-            ? p.likeCount
-            : undefined,
-      replyCount: (() => {
-        const textPostAppInfo = p.text_post_app_info as Record<string, unknown> | undefined;
-        if (typeof textPostAppInfo?.direct_reply_count === 'number') {
-          return textPostAppInfo.direct_reply_count;
-        }
-        return typeof p.replyCount === 'number' ? p.replyCount : undefined;
-      })(),
-      repostCount: (() => {
-        const textPostAppInfo = p.text_post_app_info as Record<string, unknown> | undefined;
-        if (typeof textPostAppInfo?.repost_count === 'number') {
-          return textPostAppInfo.repost_count;
-        }
-        return typeof p.repostCount === 'number' ? p.repostCount : undefined;
-      })(),
-      media: this.parseMedia(p),
-      _raw: data,
+      createdAt: this.parseTimestamp(postData.taken_at ?? postData.timestamp),
+      likeCount: typeof postData.like_count === 'number' ? postData.like_count : undefined,
+      replyCount: typeof textPostAppInfo?.direct_reply_count === 'number' 
+        ? textPostAppInfo.direct_reply_count 
+        : undefined,
+      repostCount: typeof textPostAppInfo?.repost_count === 'number' 
+        ? textPostAppInfo.repost_count 
+        : undefined,
+      media: this.parseMedia(postData),
+      _raw: raw,
     };
   }
 
@@ -713,93 +661,6 @@ export class ThreadsClient {
     return new Date().toISOString();
   }
 
-  /**
-   * Parse a list of posts from GraphQL response.
-   */
-  private parsePostList(data: unknown): {
-    posts: PostData[];
-    nextCursor?: string;
-  } {
-    const posts: PostData[] = [];
-    let nextCursor: string | undefined;
-
-    if (!data || typeof data !== 'object') {
-      return { posts };
-    }
-
-    const d = data as Record<string, unknown>;
-    const dData = d.data as Record<string, unknown> | undefined;
-
-    // Try various response structures
-    const items =
-      d.threads ??
-      d.items ??
-      d.edges ??
-      d.thread_items ??
-      dData?.threads ??
-      [];
-
-    if (Array.isArray(items)) {
-      for (const item of items) {
-        const i = item as Record<string, unknown>;
-        const postData = i.node ?? i.post ?? i.thread ?? i;
-        const post = this.parsePostData(postData);
-        if (post) {
-          posts.push(post);
-        }
-      }
-    }
-
-    // Extract cursor for pagination
-    const pageInfo = d.page_info as Record<string, unknown> | undefined;
-    if (pageInfo?.end_cursor) {
-      nextCursor = String(pageInfo.end_cursor);
-    } else if (d.next_cursor) {
-      nextCursor = String(d.next_cursor);
-    }
-
-    return { posts, nextCursor };
-  }
-
-  /**
-   * Parse a list of users from GraphQL response.
-   */
-  private parseUserList(data: unknown): {
-    users: UserData[];
-    nextCursor?: string;
-  } {
-    const users: UserData[] = [];
-    let nextCursor: string | undefined;
-
-    if (!data || typeof data !== 'object') {
-      return { users };
-    }
-
-    const d = data as Record<string, unknown>;
-
-    const items = d.users ?? d.items ?? d.edges ?? [];
-
-    if (Array.isArray(items)) {
-      for (const item of items) {
-        const i = item as Record<string, unknown>;
-        const userData = i.node ?? i.user ?? i;
-        const user = this.parseUserData(userData);
-        if (user) {
-          users.push(user);
-        }
-      }
-    }
-
-    // Extract cursor
-    const pageInfo = d.page_info as Record<string, unknown> | undefined;
-    if (pageInfo?.end_cursor) {
-      nextCursor = String(pageInfo.end_cursor);
-    } else if (d.next_cursor) {
-      nextCursor = String(d.next_cursor);
-    }
-
-    return { users, nextCursor };
-  }
 }
 
 // Export types
@@ -813,6 +674,6 @@ export type {
   GetPostResult,
   GetPostsResult,
   FeedResult,
-  SearchResult,
+  UserSearchResult,
   FollowListResult,
 } from './threads-client-types.js';
