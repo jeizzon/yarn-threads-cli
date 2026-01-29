@@ -1,5 +1,5 @@
 {
-  "name": "@threads-cli/yarn",
+  "name": "yarn-threads-cli",
   "version": "0.1.0",
   "description": "CLI for Threads (like bird for Twitter)",
   "type": "module",
