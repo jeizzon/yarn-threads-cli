@@ -1,6 +1,6 @@
 {
   "name": "yarn-threads-cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Fast CLI for Threads — read posts, browse profiles, search users from the terminal",
   "type": "module",
   "main": "dist/index.js",
