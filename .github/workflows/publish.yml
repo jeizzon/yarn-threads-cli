@@ -3,6 +3,13 @@ name: Publish to npm & GitHub Packages
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      github_packages_only:
+        description: 'Publish to GitHub Packages only (no version bump)'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
   publish:
@@ -28,17 +35,20 @@ jobs:
         run: npm run build
 
       - name: Configure git
+        if: ${{ github.event.inputs.github_packages_only != 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Bump version
+        if: ${{ github.event.inputs.github_packages_only != 'true' }}
         run: |
           npm version patch -m "chore: bump version to %s [skip ci]"
           git push
           git push --tags
 
       - name: Publish to npm
+        if: ${{ github.event.inputs.github_packages_only != 'true' }}
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
