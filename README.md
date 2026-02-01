@@ -20,6 +20,7 @@ yarn-threads user-posts zuck
 
 ## Features
 
+- **Post, reply, quote** — Create posts, reply to threads, quote existing posts
 - **Read posts** — Fetch any thread by URL or shortcode
 - **Browse profiles** — View user info, posts, followers, following
 - **Search users** — Find accounts by name or handle
@@ -157,6 +158,33 @@ yarn-threads followers zuck --limit 100
 ```bash
 yarn-threads following zuck
 yarn-threads following jeizzon.mp4 --limit 50
+```
+
+### `post <text>` — Create a new post
+
+```bash
+yarn-threads post "Hello from the terminal!"
+yarn-threads post "Only friends can reply" --reply-control accounts_you_follow
+yarn-threads post "Mentioned only" --reply-control mentioned_only
+```
+
+**Reply control options:**
+- `everyone` (default) — Anyone can reply
+- `accounts_you_follow` — Only accounts you follow can reply
+- `mentioned_only` — Only mentioned accounts can reply
+
+### `reply <url-or-code> <text>` — Reply to a post
+
+```bash
+yarn-threads reply https://www.threads.net/@zuck/post/DTa3-B1EbTp "Great post!"
+yarn-threads reply DTa3-B1EbTp "Nice one"  # shortcode
+```
+
+### `quote <url-or-code> <text>` — Quote a post
+
+```bash
+yarn-threads quote https://www.threads.net/@zuck/post/DTa3-B1EbTp "This is important"
+yarn-threads quote DTa3-B1EbTp "Thoughts on this:"
 ```
 
 ## Output Formats
