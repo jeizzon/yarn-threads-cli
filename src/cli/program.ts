@@ -11,6 +11,7 @@ import { registerReadCommands } from '../commands/read.js';
 import { registerFeedCommands } from '../commands/feed.js';
 import { registerUserCommands } from '../commands/user.js';
 import { registerSearchCommand } from '../commands/search.js';
+import { registerPostCommands } from '../commands/post.js';
 
 // Known commands for argument resolution
 export const KNOWN_COMMANDS = new Set([
@@ -26,6 +27,9 @@ export const KNOWN_COMMANDS = new Set([
   'user-posts',
   'following',
   'followers',
+  'post',
+  'reply',
+  'quote',
   'help',
 ]);
 
@@ -78,6 +82,7 @@ export function createProgram(ctx: CliContext): Command {
   registerFeedCommands(program, ctx);
   registerUserCommands(program, ctx);
   registerSearchCommand(program, ctx);
+  registerPostCommands(program, ctx);
 
   // Custom help header
   program.addHelpText('beforeAll', `

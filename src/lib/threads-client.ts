@@ -15,6 +15,9 @@ import type {
   FeedResult,
   UserSearchResult,
   FollowListResult,
+  PublishOptions,
+  PublishResult,
+  ReplyControl,
 } from './threads-client-types.js';
 
 // Instagram mobile API base URL
@@ -497,6 +500,171 @@ export class ThreadsClient {
     return { success: true, users: parsedUsers };
   }
 
+  // ============ Publish Methods ============
+
+  /**
+   * Get the current user's ID (needed for publishing).
+   * Cached after first call.
+   */
+  private cachedUserId: string | null = null;
+
+  private async getUserId(): Promise<string | null> {
+    if (this.cachedUserId) {
+      return this.cachedUserId;
+    }
+
+    const whoami = await this.whoami();
+    if (whoami.success) {
+      this.cachedUserId = whoami.user.id;
+      return this.cachedUserId;
+    }
+
+    return null;
+  }
+
+  /**
+   * Generate a random device ID for Android.
+   */
+  private generateDeviceId(): string {
+    return `android-${Math.random().toString(36).substring(2, 15)}`;
+  }
+
+  /**
+   * Convert reply control enum to API value.
+   */
+  private replyControlToValue(control: ReplyControl): number {
+    switch (control) {
+      case 'everyone':
+        return 0;
+      case 'accounts_you_follow':
+        return 1;
+      case 'mentioned_only':
+        return 2;
+      default:
+        return 0;
+    }
+  }
+
+  /**
+   * Publish a new text post/thread.
+   * Uses Instagram mobile API: POST /api/v1/media/configure_text_only_post/
+   */
+  async publish(options: PublishOptions): Promise<PublishResult> {
+    const userId = await this.getUserId();
+    if (!userId) {
+      return { success: false, error: 'Could not get user ID. Please check your authentication.' };
+    }
+
+    const deviceId = this.generateDeviceId();
+    const uploadId = Date.now().toString();
+    const timezoneOffset = new Date().getTimezoneOffset() * -60; // Convert to seconds
+
+    const replyControlValue = this.replyControlToValue(options.replyControl ?? 'everyone');
+
+    // Build the payload
+    const payload: Record<string, unknown> = {
+      publish_mode: 'text_post',
+      text_post_app_info: JSON.stringify({
+        reply_control: replyControlValue,
+      }),
+      timezone_offset: timezoneOffset.toString(),
+      source_type: '4',
+      caption: options.text,
+      _uid: userId,
+      device_id: deviceId,
+      upload_id: uploadId,
+      device: {
+        manufacturer: 'OnePlus',
+        model: 'ONEPLUS+A3010',
+        android_version: 25,
+        android_release: '7.1.1',
+      },
+    };
+
+    // Add reply target if this is a reply
+    if (options.replyToPostId) {
+      payload.text_post_app_info = JSON.stringify({
+        reply_control: replyControlValue,
+        reply_id: options.replyToPostId,
+      });
+    }
+
+    // Add quote target if this is a quote post
+    if (options.quotedPostId) {
+      payload.text_post_app_info = JSON.stringify({
+        reply_control: replyControlValue,
+        quoted_post_id: options.quotedPostId,
+      });
+    }
+
+    // Build signed body (Instagram API format)
+    const payloadJson = JSON.stringify(payload);
+    const signedBody = `SIGNATURE.${payloadJson}`;
+
+    const body = new URLSearchParams();
+    body.append('signed_body', signedBody);
+
+    const result = await this.instagramApiRequest(
+      '/api/v1/media/configure_text_only_post/',
+      { method: 'POST', body }
+    );
+
+    if (!result.success) {
+      return { success: false, error: result.error ?? 'Failed to publish post' };
+    }
+
+    // Extract post ID from response
+    const media = result.data?.media as Record<string, unknown> | undefined;
+    if (!media) {
+      return { success: false, error: 'No media data in response' };
+    }
+
+    const postId = String(media.pk ?? media.id ?? '');
+    const code = media.code ? String(media.code) : undefined;
+
+    if (!postId) {
+      return { success: false, error: 'Could not extract post ID from response' };
+    }
+
+    return { success: true, postId, code };
+  }
+
+  /**
+   * Publish a reply to an existing post.
+   * Convenience method that calls publish() with replyToPostId.
+   */
+  async reply(postCode: string, text: string, replyControl?: ReplyControl): Promise<PublishResult> {
+    // Get the post to retrieve its media ID
+    const postResult = await this.getPost(postCode);
+    if (!postResult.success) {
+      return { success: false, error: `Could not find post: ${postResult.error}` };
+    }
+
+    return this.publish({
+      text,
+      replyControl,
+      replyToPostId: postResult.post.id,
+    });
+  }
+
+  /**
+   * Publish a quote post.
+   * Convenience method that calls publish() with quotedPostId.
+   */
+  async quote(postCode: string, text: string, replyControl?: ReplyControl): Promise<PublishResult> {
+    // Get the post to retrieve its media ID
+    const postResult = await this.getPost(postCode);
+    if (!postResult.success) {
+      return { success: false, error: `Could not find post: ${postResult.error}` };
+    }
+
+    return this.publish({
+      text,
+      replyControl,
+      quotedPostId: postResult.post.id,
+    });
+  }
+
   // ============ Data Parsing Helpers ============
 
   /**
@@ -676,4 +844,7 @@ export type {
   FeedResult,
   UserSearchResult,
   FollowListResult,
+  PublishOptions,
+  PublishResult,
+  ReplyControl,
 } from './threads-client-types.js';

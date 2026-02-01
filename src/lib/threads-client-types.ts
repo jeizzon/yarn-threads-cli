@@ -103,3 +103,18 @@ export type FollowListResult =
 export type WhoamiResult =
   | { success: true; user: UserData }
   | { success: false; error: string };
+
+// Publish options
+export type ReplyControl = 'everyone' | 'accounts_you_follow' | 'mentioned_only';
+
+export interface PublishOptions {
+  text: string;
+  replyControl?: ReplyControl;
+  replyToPostId?: string;
+  quotedPostId?: string;
+}
+
+// Publish result
+export type PublishResult =
+  | { success: true; postId: string; code?: string }
+  | { success: false; error: string };
